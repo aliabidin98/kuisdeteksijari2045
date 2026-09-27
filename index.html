@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal Kuis Deteksi Jari AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Libraries for Hand Tracking -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <!-- SheetJS (xlsx) for Excel Import -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 100%);
+            overflow-x: hidden;
+        }
+
+        /* View Management */
+        .view-screen {
+            display: none;
+            min-height: 100vh;
+            width: 100vw;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        .view-screen.active {
+            display: flex;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Main Menu Cards */
+        .menu-btn {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .menu-btn:hover {
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        /* Video & Canvas styling */
+        .camera-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 24px;
+            overflow: hidden;
+            background-color: #1e293b;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .input_video {
+            display: none;
+        }
+        
+        .output_canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror effect is CRITICAL for UX */
+        }
+
+        /* Split Screen Guide for 2 Players */
+        .split-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: 2px;
+            background: rgba(255,255,255,0.3);
+            border-left: 2px dashed rgba(255,255,255,0.5);
+            transform: translateX(-50%);
+            z-index: 10;
+            display: none; /* Shown only in 2p mode */
+        }
+
+        /* Option Cards */
+        .option-card {
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* NEW Game View Styles */
+        .game-overlay-ui {
+            z-index: 20;
+            pointer-events: none; /* Allows clicks to pass through to the background if needed */
+        }
+        .pointer-events-auto {
+            pointer-events: auto;
+        }
+        
+        .option-card-new {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            background-color: rgba(0, 0, 0, 0.15); /* Lebih transparan lagi */
+            border: 1px solid rgba(255, 255, 255, 0.15); /* Border kaca sangat tipis */
+            backdrop-filter: blur(2px); /* Blur sangat minimal */
+            -webkit-backdrop-filter: blur(2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+        
+        .option-card-new.correct {
+            background-color: rgba(34, 197, 94, 0.25) !important; /* Hijau Transparan */
+            border-color: rgba(255, 255, 255, 0.5) !important;
+        }
+        
+        .option-card-new.wrong {
+            background-color: rgba(239, 68, 68, 0.25) !important; /* Merah Transparan */
+            border-color: rgba(255, 255, 255, 0.5) !important;
+        }
+        
+        .option-card-new.correct *, .option-card-new.wrong * {
+            color: white !important;
+        }
+        
+        .progress-bg {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 0%;
+            transition: width 0.1s linear;
+            z-index: 1;
+        }
+        .progress-bg.p1 { background-color: rgba(59, 130, 246, 0.2); }
+        .progress-bg.p2 { background-color: rgba(239, 68, 68, 0.2); }
+        
+        .card-content {
+            position: relative;
+            z-index: 10;
+        }
+
+        .split-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: 4px;
+            background: linear-gradient(to bottom, rgba(255,255,255,0.05), rgba(255,255,255,0.5), rgba(255,255,255,0.05));
+            transform: translateX(-50%);
+            z-index: 15;
+            display: none;
+        }
+
+        /* Loader */
+        .loader {
+            border: 6px solid #f3f3f3;
+            border-top: 6px solid #3b82f6;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Scrollbar for Editor */
+        .custom-scroll::-webkit-scrollbar { width: 8px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <!-- Global Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-white/95 z-[100] hidden flex-col items-center justify-center backdrop-blur-sm">
+        <div class="loader mb-4"></div>
+        <h2 class="text-2xl font-bold text-gray-800 mb-2" id="loading-text">Memuat Sistem AI...</h2>
+        <p class="text-gray-500 text-center px-4">Pastikan Anda memberikan izin akses kamera.</p>
+    </div>
+
+    <!-- Custom Modal Replacement for alert/confirm -->
+    <div id="custom-modal" class="fixed inset-0 bg-black/60 z-[120] hidden flex items-center justify-center p-4 backdrop-blur-xs">
+        <div class="bg-white rounded-3xl p-6 max-w-sm w-full text-center shadow-2xl">
+            <h3 id="modal-title" class="text-xl font-bold mb-2 text-gray-800">Pemberitahuan</h3>
+            <p id="modal-msg" class="text-gray-600 mb-6">Pesan...</p>
+            <div id="modal-actions" class="flex gap-2 justify-center">
+                <button id="modal-btn-ok" onclick="closeCustomModal()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl transition w-full">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-menu" class="view-screen active flex-col items-center justify-center p-4">
+        <div class="max-w-4xl w-full">
+            <div class="text-center mb-12">
+                <div class="inline-block p-4 bg-white rounded-3xl shadow-xl mb-6 transform -rotate-2">
+                    <i class="fas fa-robot text-5xl text-blue-500"></i>
+                    <i class="fas fa-hand-sparkles text-4xl text-yellow-500 -ml-2 mt-4"></i>
+                </div>
+                <h1 class="text-4xl md:text-6xl font-black text-gray-800 mb-4 tracking-tight">Kuis Deteksi Jari</h1>
+                <p class="text-xl text-gray-600 font-semibold">Jawab pertanyaan tanpa menyentuh layar!</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 px-4">
+                <!-- 1 Player -->
+                <button onclick="initGame(1)" class="menu-btn bg-white p-8 rounded-3xl shadow-lg border-2 border-transparent hover:border-blue-400 flex flex-col items-center justify-center text-center group">
+                    <div class="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-500 transition-colors">
+                        <i class="fas fa-user text-3xl text-blue-500 group-hover:text-white"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-2">1 Pemain</h2>
+                    <p class="text-gray-500">Bermain sendiri dan raih skor tertinggi.</p>
+                </button>
+
+                <!-- 2 Players -->
+                <button onclick="initGame(2)" class="menu-btn bg-white p-8 rounded-3xl shadow-lg border-2 border-transparent hover:border-red-400 flex flex-col items-center justify-center text-center group">
+                    <div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-red-500 transition-colors">
+                        <i class="fas fa-user-friends text-3xl text-red-500 group-hover:text-white"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-2">2 Pemain (Duel)</h2>
+                    <p class="text-gray-500">Berdiri berdampingan. Siapa cepat, dia dapat!</p>
+                </button>
+
+                <!-- Editor -->
+                <button onclick="switchView('view-editor')" class="menu-btn bg-white p-8 rounded-3xl shadow-lg border-2 border-transparent hover:border-purple-400 flex flex-col items-center justify-center text-center group">
+                    <div class="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-purple-500 transition-colors">
+                        <i class="fas fa-edit text-3xl text-purple-500 group-hover:text-white"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-2">Input Soal</h2>
+                    <p class="text-gray-500">Buat, edit, dan kelola daftar pertanyaan kuis.</p>
+                </button>
+
+                <!-- How to Play -->
+                <button onclick="switchView('view-help')" class="menu-btn bg-white p-8 rounded-3xl shadow-lg border-2 border-transparent hover:border-green-400 flex flex-col items-center justify-center text-center group">
+                    <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4 group-hover:bg-green-500 transition-colors">
+                        <i class="fas fa-question text-3xl text-green-500 group-hover:text-white"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-2">Cara Bermain</h2>
+                    <p class="text-gray-500">Pelajari cara menggunakan jari untuk menjawab.</p>
+                </button>
+            </div>
+
+            <!-- Footer Author -->
+            <div class="text-center mt-12 text-gray-500 font-semibold text-sm">
+                Dibuat oleh M. Nur Ali Abidin, S. Pd.
+            </div>
+        </div>
+    </div>
+
+    <div id="view-editor" class="view-screen flex-col bg-white">
+        <!-- Header -->
+        <div class="bg-purple-600 text-white p-4 shadow-md flex items-center justify-between sticky top-0 z-20">
+            <h2 class="text-2xl font-bold"><i class="fas fa-edit mr-2"></i> Kelola Soal Kuis</h2>
+            <button onclick="switchView('view-menu')" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-xl transition font-semibold">
+                <i class="fas fa-home mr-2"></i> Menu Utama
+            </button>
+        </div>
+
+        <div class="flex-grow flex flex-col md:flex-row overflow-hidden">
+            <!-- Left: Form Input -->
+            <div class="w-full md:w-1/3 bg-gray-50 p-6 border-r border-gray-200 overflow-y-auto custom-scroll">
+                
+                <!-- Import Excel Section -->
+                <div class="mb-6 bg-purple-50 p-4 rounded-2xl border border-purple-200 shadow-sm">
+                    <h4 class="font-bold text-purple-900 mb-2 flex items-center"><i class="fas fa-file-excel mr-2 text-green-600"></i> Impor dari Excel/CSV</h4>
+                    <p class="text-xs text-purple-700 mb-3">Format kolom: Pertanyaan, Opsi A, Opsi B, Opsi C, Opsi D, Jawaban Benar (1-4)</p>
+                    <div class="flex gap-2">
+                        <label class="flex-grow bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-2 px-3 rounded-xl transition cursor-pointer text-center shadow">
+                            <i class="fas fa-upload mr-1"></i> Pilih File Excel
+                            <input type="file" id="excel-file-input" accept=".xlsx, .xls, .csv" class="hidden" onchange="importExcel(event)">
+                        </label>
+                        <button onclick="downloadTemplate()" class="bg-white hover:bg-gray-100 text-gray-700 text-sm font-bold py-2 px-3 rounded-xl transition border border-gray-300" title="Unduh Contoh Template">
+                            <i class="fas fa-download"></i> Template
+                        </button>
+                    </div>
+                </div>
+
+                <h3 class="text-xl font-bold mb-4" id="form-title">Tambah Soal Baru</h3>
+                <form id="question-form" class="space-y-4" onsubmit="saveQuestion(event)">
+                    <input type="hidden" id="edit-index" value="-1">
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-1">Pertanyaan</label>
+                        <textarea id="input-q" required class="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition" rows="3" placeholder="Contoh: Apa warna daun?"></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">Opsi A (1 Jari)</label>
+                            <input type="text" id="input-opt1" required class="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">Opsi B (2 Jari)</label>
+                            <input type="text" id="input-opt2" required class="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">Opsi C (3 Jari)</label>
+                            <input type="text" id="input-opt3" required class="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-1">Opsi D (4 Jari)</label>
+                            <input type="text" id="input-opt4" required class="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-1">Jawaban Benar</label>
+                        <select id="input-correct" class="w-full p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500 bg-white">
+                            <option value="1">A (1 Jari)</option>
+                            <option value="2">B (2 Jari)</option>
+                            <option value="3">C (3 Jari)</option>
+                            <option value="4">D (4 Jari)</option>
+                        </select>
+                    </div>
+
+                    <div class="flex gap-2 pt-2">
+                        <button type="submit" class="flex-grow bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition shadow-md">
+                            <i class="fas fa-save mr-2"></i> Simpan
+                        </button>
+                        <button type="button" onclick="resetForm()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-3 px-4 rounded-xl transition">
+                            Batal
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Right: List Soal -->
+            <div class="w-full md:w-2/3 p-6 bg-white overflow-y-auto custom-scroll">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-xl font-bold text-gray-800">Daftar Soal Tersimpan</h3>
+                    <button onclick="resetToDefaultQuestions()" class="text-sm text-red-500 hover:text-red-700 font-semibold underline">
+                        Reset ke Soal Bawaan
+                    </button>
+                </div>
+                
+                <div id="questions-list" class="space-y-4">
+                    <!-- Daftar soal akan di-render di sini oleh JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-help" class="view-screen bg-white flex-col items-center p-4 md:p-8">
+        <div class="max-w-4xl w-full relative">
+            <button onclick="switchView('view-menu')" class="absolute top-0 right-0 bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-2xl transition font-bold shadow-sm z-10">
+                <i class="fas fa-times mr-2"></i> Tutup
+            </button>
+            
+            <h2 class="text-4xl font-black text-center mb-8 text-green-600 mt-4 md:mt-0">Cara Bermain</h2>
+            
+            <div class="bg-green-50 p-6 md:p-10 rounded-3xl border-2 border-green-200 shadow-lg mb-8">
+                <h3 class="text-2xl font-bold mb-6 text-gray-800 border-b-2 border-green-200 pb-2">Instruksi Dasar</h3>
+                <ul class="space-y-4 text-lg text-gray-700">
+                    <li class="flex items-start"><i class="fas fa-check-circle text-green-500 mt-1 mr-3"></i> Pastikan Anda berada di tempat yang terang.</li>
+                    <li class="flex items-start"><i class="fas fa-check-circle text-green-500 mt-1 mr-3"></i> Arahkan kamera menghadap ke Anda.</li>
+                    <li class="flex items-start"><i class="fas fa-check-circle text-green-500 mt-1 mr-3"></i> Untuk menjawab, <strong>angkat jari Anda ke depan kamera</strong> dan tahan selama 1 detik sampai indikator penuh.</li>
+                </ul>
+            </div>
+
+            <h3 class="text-2xl font-bold mb-6 text-center text-gray-800">Kode Jari</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white p-6 rounded-3xl shadow border-2 border-blue-100 text-center">
+                    <div class="text-5xl mb-4">☝️</div>
+                    <div class="font-bold text-xl text-blue-600">Jawaban A</div>
+                    <div class="text-gray-500 text-sm mt-1">Angkat 1 Jari</div>
+                </div>
+                <div class="bg-white p-6 rounded-3xl shadow border-2 border-yellow-100 text-center">
+                    <div class="text-5xl mb-4">✌️</div>
+                    <div class="font-bold text-xl text-yellow-600">Jawaban B</div>
+                    <div class="text-gray-500 text-sm mt-1">Angkat 2 Jari</div>
+                </div>
+                <div class="bg-white p-6 rounded-3xl shadow border-2 border-purple-100 text-center">
+                    <div class="text-5xl mb-4">🤟</div>
+                    <div class="font-bold text-xl text-purple-600">Jawaban C</div>
+                    <div class="text-gray-500 text-sm mt-1">Angkat 3 Jari</div>
+                </div>
+                <div class="bg-white p-6 rounded-3xl shadow border-2 border-red-100 text-center">
+                    <div class="text-5xl mb-4">🖐️</div>
+                    <div class="font-bold text-xl text-red-600">Jawaban D</div>
+                    <div class="text-gray-500 text-sm mt-1">Angkat 4 Jari</div>
+                </div>
+            </div>
+
+            <div class="mt-8 bg-blue-50 p-6 rounded-3xl border-2 border-blue-200">
+                <h3 class="text-xl font-bold mb-2 text-blue-800"><i class="fas fa-info-circle mr-2"></i> Info Mode 2 Pemain (Duel)</h3>
+                <p class="text-gray-700">Dalam mode 2 pemain, layar dibagi menjadi dua (kiri dan kanan). Pemain 1 berdiri di sebelah kiri kamera, Pemain 2 di kanan. Masing-masing memiliki panel soal. Pemain pertama yang berhasil menahan jawabannya akan mendapatkan poin!</p>
+            </div>
+
+            <!-- Footer Author -->
+            <div class="text-center mt-8 text-gray-500 font-semibold text-sm">
+                Dibuat oleh M. Nur Ali Abidin, S. Pd.
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW IMMERSIVE GAME VIEW -->
+    <div id="view-game" class="view-screen relative h-screen w-full overflow-hidden bg-gray-900">
+        
+        <!-- Camera Background -->
+        <video class="input_video hidden" autoplay playsinline></video>
+        <canvas class="output_canvas absolute inset-0 w-full h-full object-cover" id="output_canvas"></canvas>
+        
+        <!-- Dark overlay to make UI pop -->
+        <div class="absolute inset-0 bg-black/10 z-0"></div>
+
+        <!-- Split Line for 2P mode -->
+        <div id="split-line" class="split-line"></div>
+
+        <!-- Top Navigation -->
+        <div class="absolute top-4 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-4 bg-black/20 backdrop-blur-xs px-6 py-2 rounded-full border border-white/10 shadow-lg">
+            <button onclick="exitGame()" class="text-white hover:text-red-400 transition drop-shadow-md" title="Keluar Game">
+                <i class="fas fa-sign-out-alt text-xl"></i>
+            </button>
+            <div class="h-6 w-px bg-white/30"></div>
+            <div class="text-center">
+                <div class="text-lg font-black text-white drop-shadow-md" id="question-counter">1 / 10</div>
+            </div>
+        </div>
+
+        <!-- Dual UI Layer -->
+        <div id="ui-layer" class="absolute inset-0 game-overlay-ui flex p-4 md:p-8 pt-20 justify-center gap-4 md:gap-8">
+            
+            <!-- Player 1 Panel -->
+            <div id="p1-container" class="flex-1 flex flex-col pointer-events-auto h-full max-w-lg transition-all duration-300">
+                <!-- Status P1 -->
+                <div class="bg-blue-950/20 text-white rounded-3xl p-4 mb-4 backdrop-blur-xs flex justify-between items-center border border-blue-400/20 shadow-lg">
+                    <div>
+                        <span class="text-xs uppercase font-bold text-blue-100 tracking-wider drop-shadow-sm" id="p1-name">Pemain 1</span>
+                        <div class="text-3xl font-black drop-shadow-md" id="score-p1">0</div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-xs uppercase font-bold text-blue-100 tracking-wider drop-shadow-sm">Deteksi Jari</span>
+                        <div class="text-4xl font-black text-yellow-300 leading-none drop-shadow-md" id="detected-p1">0</div>
+                    </div>
+                </div>
+
+                <!-- Quiz P1 -->
+                <div class="bg-black/10 rounded-3xl p-5 backdrop-blur-xs flex-grow flex flex-col mb-2 border border-white/10 shadow-lg overflow-y-auto">
+                    <h2 class="text-xl md:text-2xl font-bold text-white drop-shadow-lg mb-5 text-center px-2" id="question-text-p1">Memuat pertanyaan...</h2>
+                    <div class="grid grid-cols-1 gap-3 flex-grow content-start">
+                        <!-- Opt 1 -->
+                        <div class="option-card-new rounded-2xl p-3 flex items-center cursor-default" id="opt-p1-1">
+                            <div class="progress-bg p1" id="prog-p1-1"></div>
+                            <div class="card-content flex items-center w-full">
+                                <div class="bg-black/30 text-white border border-white/20 rounded-xl w-12 h-12 flex items-center justify-center font-black text-xl mr-3 shrink-0 shadow-sm">A</div>
+                                <div class="flex-grow">
+                                    <div class="text-xs text-white/90 mb-1 font-bold drop-shadow-md">1 JARI ☝️</div>
+                                    <div class="text-lg font-bold text-white drop-shadow-lg leading-tight" id="text-opt-p1-1">Opsi A</div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Opt 2 -->
+                        <div class="option-card-new rounded-2xl p-3 flex items-center cursor-default" id="opt-p1-2">
+                            <div class="progress-bg p1" id="prog-p1-2"></div>
+                            <div class="card-content flex items-center w-full">
+                                <div class="bg-black/30 text-white border border-white/20 rounded-xl w-12 h-12 flex items-center justify-center font-black text-xl mr-3 shrink-0 shadow-sm">B</div>
+                                <div class="flex-grow">
+                                    <div class="text-xs text-white/90 mb-1 font-bold drop-shadow-md">2 JARI ✌️</div>
+                                    <div class="text-lg font-bold text-white drop-shadow-lg leading-tight" id="text-opt-p1-2">Opsi B</div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Opt 3 -->
+                        <div class="option-card-new rounded-2xl p-3 flex items-center cursor-default" id="opt-p1-3">
+                            <div class="progress-bg p1" id="prog-p1-3"></div>
+                            <div class="card-content flex items-center w-full">
+                                <div class="bg-black/30 text-white border border-white/20 rounded-xl w-12 h-12 flex items-center justify-center font-black text-xl mr-3 shrink-0 shadow-sm">C</div>
+                                <div class="flex-grow">
+                                    <div class="text-xs text-white/90 mb-1 font-bold drop-shadow-md">3 JARI 🤟</div>
+                                    <div class="text-lg font-bold text-white drop-shadow-lg leading-tight" id="text-opt-p1-3">Opsi C</div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Opt 4 -->
+                        <div class="option-card-new rounded-2xl p-3 flex items-center cursor-default" id="opt-p1-4">
+                            <div class="progress-bg p1" id="prog-p1-4"></div>
+                            <div class="card-content flex items-center w-full">
+                                <div class="bg-black/30 text-white border border-white/20 rounded-xl w-12 h-12 flex items-center justify-center font-black text-xl mr-3 shrink-0 shadow-sm">D</div>
+                                <div class="flex-grow">
+                                    <div class="text-xs text-white/90 mb-1 font-bold drop-shadow-md">4 JARI 🖐️</div>
+                                    <div class="text-lg font-bold text-white drop-shadow-lg leading-tight" id="text-opt-p1-4">Opsi D</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Player 2 Panel (Hidden in 1P) -->
+            <div id="p2-container" class="flex-1 flex flex-col pointer-events-auto h-full max-w-lg transition-all duration-300 hidden">
+                <!-- Status P2 -->
+                <div class="bg-red-950/20 text-white rounded-3xl p-4 mb-4 backdrop-blur-xs flex justify-between items-center border border-red-400/20 shadow-lg">
+                    <div>
+                        <span class="text-xs uppercase font-bold text-red-100 tracking-wider drop-shadow-sm" id="p2-name">Pemain 2</span>
+                        <div class="text-3xl font-black drop-shadow-md" id="score-p2">0</div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-xs uppercase font-bold text-red-100 tracking-wider drop-shadow-sm">Deteksi Jari</span>
+                        <div class="text-4xl font-black text-yellow-300 leading-none drop-shadow-md" id="detected-p2">0</div>
+                    </div>
+                </div>
+
+                <!-- Quiz P2 -->
+                <div class="bg-black/10 rounded-3xl p-5 backdrop-blur-xs flex-grow flex flex-col mb-2 border border-white/10 shadow-lg overflow-y-auto">
+                    <h2 class="text-xl md:text-2xl font-bold text-white drop-shadow-lg mb-5 text-center px-2" id="question-text-p2">Memuat pertanyaan...</h2>
+                    <div class="grid grid-cols-1 gap-3 flex-grow content-start">
+                        <!-- Opt 1 -->
+                        <div class="option-card-new rounded-2xl p-3 flex items-center cursor-default" id="opt-p2-1">
+                            <div class="progress-bg p2" id="prog-p2-1"></div>
+                            <div class="card-content flex items-center w-full">
+                                <div class="bg-black/30 text-white border border-white/20 rounded-xl w-12 h-12 flex items-center justify-center font-black text-xl mr-3 shrink-0 shadow-sm">A</div>
+                                <div class="flex-grow">
+                                    <div class="text-xs text-white/90 mb-1 font-bold drop-shadow-md">1 JARI ☝️</div>
+                                    <div class="text-lg font-bold text-white drop-shadow-lg leading-tight" id="text-opt-p2-1">Opsi A</div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Opt 2 -->
+                        <div class="option-card-new rounded-2xl p-3 flex items-center cursor-default" id="opt-p2-2">
+                            <div class="progress-bg p2" id="prog-p2-2"></div>
+                            <div class="card-content flex items-center w-full">
+                                <div class="bg-black/30 text-white border border-white/20 rounded-xl w-12 h-12 flex items-center justify-center font-black text-xl mr-3 shrink-0 shadow-sm">B</div>
+                                <div class="flex-grow">
+                                    <div class="text-xs text-white/90 mb-1 font-bold drop-shadow-md">2 JARI ✌️</div>
+                                    <div class="text-lg font-bold text-white drop-shadow-lg leading-tight" id="text-opt-p2-2">Opsi B</div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Opt 3 -->
+                        <div class="option-card-new rounded-2xl p-3 flex items-center cursor-default" id="opt-p2-3">
+                            <div class="progress-bg p2" id="prog-p2-3"></div>
+                            <div class="card-content flex items-center w-full">
+                                <div class="bg-black/30 text-white border border-white/20 rounded-xl w-12 h-12 flex items-center justify-center font-black text-xl mr-3 shrink-0 shadow-sm">C</div>
+                                <div class="flex-grow">
+                                    <div class="text-xs text-white/90 mb-1 font-bold drop-shadow-md">3 JARI 🤟</div>
+                                    <div class="text-lg font-bold text-white drop-shadow-lg leading-tight" id="text-opt-p2-3">Opsi C</div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Opt 4 -->
+                        <div class="option-card-new rounded-2xl p-3 flex items-center cursor-default" id="opt-p2-4">
+                            <div class="progress-bg p2" id="prog-p2-4"></div>
+                            <div class="card-content flex items-center w-full">
+                                <div class="bg-black/30 text-white border border-white/20 rounded-xl w-12 h-12 flex items-center justify-center font-black text-xl mr-3 shrink-0 shadow-sm">D</div>
+                                <div class="flex-grow">
+                                    <div class="text-xs text-white/90 mb-1 font-bold drop-shadow-md">4 JARI 🖐️</div>
+                                    <div class="text-lg font-bold text-white drop-shadow-lg leading-tight" id="text-opt-p2-4">Opsi D</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="game-over-modal" class="fixed inset-0 bg-black/80 z-[60] hidden flex-col items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl p-8 max-w-md w-full text-center">
+            <h2 class="text-4xl font-black text-gray-800 mb-2">Selesai! 🎉</h2>
+            <p class="text-gray-600 mb-6 text-lg" id="game-over-msg">Kuis telah berakhir.</p>
+            
+            <div id="result-1p" class="mb-8">
+                <div class="text-sm font-bold text-gray-500 uppercase">Skor Akhir</div>
+                <div class="text-6xl font-black text-blue-500" id="final-score-1p">100</div>
+            </div>
+
+            <div id="result-2p" class="mb-8 hidden grid grid-cols-2 gap-4">
+                <div class="bg-blue-50 p-4 rounded-2xl border-2 border-blue-200">
+                    <div class="text-sm font-bold text-blue-500 uppercase">Pemain 1</div>
+                    <div class="text-4xl font-black text-blue-600 mt-2" id="final-score-p1">0</div>
+                </div>
+                <div class="bg-red-50 p-4 rounded-2xl border-2 border-red-200">
+                    <div class="text-sm font-bold text-red-500 uppercase">Pemain 2</div>
+                    <div class="text-4xl font-black text-red-600 mt-2" id="final-score-p2">0</div>
+                </div>
+                <div class="col-span-2 mt-4 text-2xl font-bold text-gray-800" id="winner-announcement">
+                    Pemenang: Pemain 1!
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="switchView('view-menu'); document.getElementById('game-over-modal').classList.add('hidden'); stopCamera();" class="flex-1 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold text-lg rounded-xl transition">
+                    Menu
+                </button>
+                <button onclick="startGame()" class="flex-1 py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold text-lg rounded-xl transition shadow-lg">
+                    Main Lagi
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Custom Alert/Confirm Replacement Modal ---
+        function showCustomModal(title, msg, onOk = null) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-msg').textContent = msg;
+            const actions = document.getElementById('modal-actions');
+            
+            if (onOk) {
+                actions.innerHTML = `
+                    <button onclick="closeCustomModal()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold px-4 py-2.5 rounded-xl transition">Batal</button>
+                    <button id="modal-confirm-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 rounded-xl transition">Ya</button>
+                `;
+                document.getElementById('modal-confirm-btn').onclick = () => {
+                    closeCustomModal();
+                    onOk();
+                };
+            } else {
+                actions.innerHTML = `<button onclick="closeCustomModal()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl transition w-full">OK</button>`;
+            }
+            document.getElementById('custom-modal').classList.remove('hidden');
+        }
+
+        function closeCustomModal() {
+            document.getElementById('custom-modal').classList.add('hidden');
+        }
+
+        // --- Data Management ---
+        const DEFAULT_QUESTIONS = [
+            { question: "Hewan apa yang menghasilkan madu?", options: ["Kupu-kupu", "Lebah", "Semut", "Lalat"], correctOption: 2 },
+            { question: "Berapa hasil dari 5 + 4?", options: ["7", "8", "9", "10"], correctOption: 3 },
+            { question: "Ibukota negara Indonesia adalah?", options: ["Surabaya", "Bandung", "Medan", "Jakarta"], correctOption: 4 },
+            { question: "Warna bendera Indonesia adalah?", options: ["Merah Putih", "Putih Merah", "Merah Hitam", "Biru Putih"], correctOption: 1 },
+            { question: "Benda langit yang bersinar di malam hari adalah?", options: ["Matahari", "Awan", "Bintang", "Pelangi"], correctOption: 3 }
+        ];
+
+        let quizData = [];
+        
+        function loadQuestions() {
+            const saved = localStorage.getItem('kuisDeteksiJari_soal');
+            if (saved) {
+                try {
+                    quizData = JSON.parse(saved);
+                } catch (e) {
+                    quizData = JSON.parse(JSON.stringify(DEFAULT_QUESTIONS));
+                }
+            } else {
+                quizData = JSON.parse(JSON.stringify(DEFAULT_QUESTIONS));
+                saveQuestionsToStorage();
+            }
+            renderQuestionList();
+        }
+
+        function saveQuestionsToStorage() {
+            localStorage.setItem('kuisDeteksiJari_soal', JSON.stringify(quizData));
+        }
+
+        // --- View Routing ---
+        function switchView(viewId) {
+            document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('active'));
+            document.getElementById(viewId).classList.add('active');
+            
+            if(viewId !== 'view-game') {
+                stopCamera();
+            }
+        }
+
+        // --- CRUD Logic ---
+        function renderQuestionList() {
+            const listContainer = document.getElementById('questions-list');
+            listContainer.innerHTML = '';
+
+            if (!quizData || quizData.length === 0) {
+                listContainer.innerHTML = '<div class="p-4 text-center text-gray-500 bg-gray-50 rounded-xl">Belum ada soal. Silakan tambahkan.</div>';
+                return;
+            }
+
+            quizData.forEach((q, index) => {
+                const item = document.createElement('div');
+                item.className = 'bg-white border border-gray-200 p-4 rounded-xl shadow-sm hover:shadow-md transition flex justify-between items-start';
+                
+                const correctLabel = ['A', 'B', 'C', 'D'][q.correctOption - 1] || 'A';
+                
+                item.innerHTML = `
+                    <div class="pr-4">
+                        <div class="font-bold text-gray-800 mb-1">${index + 1}. ${q.question}</div>
+                        <div class="text-sm text-gray-600 mb-1">
+                            A: ${q.options[0]} | B: ${q.options[1]}<br>
+                            C: ${q.options[2]} | D: ${q.options[3]}
+                        </div>
+                        <div class="text-xs font-bold text-green-600 bg-green-50 inline-block px-2 py-1 rounded">Jawaban: ${correctLabel}</div>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                        <button type="button" onclick="editQuestion(${index})" class="w-8 h-8 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 flex items-center justify-center transition" title="Edit">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button type="button" onclick="deleteQuestion(${index})" class="w-8 h-8 bg-red-100 text-red-600 rounded hover:bg-red-200 flex items-center justify-center transition" title="Hapus">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+
+        function saveQuestion(e) {
+            e.preventDefault();
+            
+            const newQ = {
+                question: document.getElementById('input-q').value,
+                options: [
+                    document.getElementById('input-opt1').value,
+                    document.getElementById('input-opt2').value,
+                    document.getElementById('input-opt3').value,
+                    document.getElementById('input-opt4').value
+                ],
+                correctOption: parseInt(document.getElementById('input-correct').value)
+            };
+
+            const editIndex = parseInt(document.getElementById('edit-index').value);
+            
+            if (editIndex >= 0) {
+                quizData[editIndex] = newQ;
+            } else {
+                quizData.push(newQ);
+            }
+
+            saveQuestionsToStorage();
+            renderQuestionList();
+            resetForm();
+        }
+
+        function editQuestion(index) {
+            const q = quizData[index];
+            document.getElementById('input-q').value = q.question;
+            document.getElementById('input-opt1').value = q.options[0];
+            document.getElementById('input-opt2').value = q.options[1];
+            document.getElementById('input-opt3').value = q.options[2];
+            document.getElementById('input-opt4').value = q.options[3];
+            document.getElementById('input-correct').value = q.correctOption;
+            
+            document.getElementById('edit-index').value = index;
+            document.getElementById('form-title').innerHTML = '<i class="fas fa-edit text-blue-500 mr-2"></i> Edit Soal';
+            
+            document.getElementById('form-title').scrollIntoView({behavior: "smooth"});
+        }
+
+        function deleteQuestion(index) {
+            showCustomModal("Konfirmasi Hapus", "Yakin ingin menghapus soal ini?", () => {
+                quizData.splice(index, 1);
+                saveQuestionsToStorage();
+                renderQuestionList();
+            });
+        }
+
+        function resetForm() {
+            document.getElementById('question-form').reset();
+            document.getElementById('edit-index').value = "-1";
+            document.getElementById('form-title').innerHTML = 'Tambah Soal Baru';
+        }
+
+        function resetToDefaultQuestions() {
+            showCustomModal("Reset Soal", "Ini akan menghapus semua soal buatan Anda dan mengembalikan ke soal bawaan. Lanjutkan?", () => {
+                quizData = JSON.parse(JSON.stringify(DEFAULT_QUESTIONS));
+                saveQuestionsToStorage();
+                renderQuestionList();
+            });
+        }
+
+        // --- Excel Import Logic ---
+        function downloadTemplate() {
+            const templateData = [
+                ["Pertanyaan", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Jawaban Benar (1-4)"],
+                ["Berapakah hasil dari 2 + 2?", "3", "4", "5", "6", "2"],
+                ["Ibukota Indonesia adalah...", "Bandung", "Surabaya", "Jakarta", "Medan", "3"]
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(templateData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "TemplateSoal");
+            XLSX.writeFile(wb, "Template_Soal_Kuis.xlsx");
+        }
+
+        function importExcel(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                    let importedCount = 0;
+                    for (let i = 1; i < json.length; i++) {
+                        const row = json[i];
+                        if (row && row.length >= 6) {
+                            const qText = row[0];
+                            const optA = row[1];
+                            const optB = row[2];
+                            const optC = row[3];
+                            const optD = row[4];
+                            let correct = parseInt(row[5]);
+
+                            if (qText && optA && optB && optC && optD && !isNaN(correct)) {
+                                if (correct >= 1 && correct <= 4) {
+                                    quizData.push({
+                                        question: String(qText),
+                                        options: [String(optA), String(optB), String(optC), String(optD)],
+                                        correctOption: correct
+                                    });
+                                    importedCount++;
+                                }
+                            }
+                        }
+                    }
+
+                    if (importedCount > 0) {
+                        saveQuestionsToStorage();
+                        renderQuestionList();
+                        showCustomModal("Sukses", `Berhasil mengimpor ${importedCount} soal baru!`);
+                    } else {
+                        showCustomModal("Perhatian", "Tidak ada data valid yang dapat dibaca. Pastikan format kolom sesuai dengan template.");
+                    }
+                } catch (err) {
+                    console.error(err);
+                    showCustomModal("Gagal", "Gagal membaca file Excel/CSV. Pastikan format file benar.");
+                } finally {
+                    e.target.value = ""; 
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        window.addEventListener('DOMContentLoaded', loadQuestions);
+
+        // Game State Variables
+        let currentMode = 1;
+        let currentIndexP1 = 0;
+        let currentIndexP2 = 0;
+        let scoreP1 = 0;
+        let scoreP2 = 0;
+        let isAnsweringP1 = false;
+        let isAnsweringP2 = false;
+        let activeQuizDataP1 = [];
+        let activeQuizDataP2 = [];
+        let finishedP1 = false;
+        let finishedP2 = false;
+        
+        let targetFingersP1 = 0;
+        let framesHeldP1 = 0;
+        
+        let targetFingersP2 = 0;
+        let framesHeldP2 = 0;
+
+        const REQUIRED_FRAMES = 30; // ~1 detik
+
+        const uiCounter = document.getElementById('question-counter');
+        const uiScoreP1 = document.getElementById('score-p1'); 
+        const uiScoreP2 = document.getElementById('score-p2');
+        const detectP1 = document.getElementById('detected-p1');
+        const detectP2 = document.getElementById('detected-p2');
+        const modalGameOver = document.getElementById('game-over-modal');
+
+        const uiQuestion = {
+            1: document.getElementById('question-text-p1'),
+            2: document.getElementById('question-text-p2')
+        };
+        
+        const cardsP1 = {}; const cardsP2 = {};
+        const textP1 = {}; const textP2 = {};
+        const progP1 = {}; const progP2 = {};
+
+        for(let i=1; i<=4; i++) {
+            cardsP1[i] = document.getElementById(`opt-p1-${i}`);
+            cardsP2[i] = document.getElementById(`opt-p2-${i}`);
+            textP1[i] = document.getElementById(`text-opt-p1-${i}`);
+            textP2[i] = document.getElementById(`text-opt-p2-${i}`);
+            progP1[i] = document.getElementById(`prog-p1-${i}`);
+            progP2[i] = document.getElementById(`prog-p2-${i}`);
+        }
+
+        function initGame(mode) {
+            if (!quizData || quizData.length === 0) {
+                showCustomModal("Perhatian", "Tidak ada soal! Silakan tambahkan soal di menu 'Input Soal'.");
+                return;
+            }
+            currentMode = mode;
+            switchView('view-game');
+            setupGameUI();
+            startMediaPipe();
+        }
+
+        function setupGameUI() {
+            const p1Container = document.getElementById('p1-container');
+            const p2Container = document.getElementById('p2-container');
+            const splitLine = document.getElementById('split-line');
+
+            if (currentMode === 1) {
+                p2Container.classList.add('hidden');
+                p1Container.classList.add('mx-auto');
+                document.getElementById('p1-name').textContent = "Pemain (Skor & Deteksi)";
+                splitLine.style.display = 'none';
+            } else {
+                p2Container.classList.remove('hidden');
+                p1Container.classList.remove('mx-auto');
+                document.getElementById('p1-name').textContent = "Pemain 1";
+                splitLine.style.display = 'block';
+            }
+        }
+
+        function startGame() {
+            modalGameOver.classList.add('hidden');
+            modalGameOver.classList.remove('flex');
+            
+            activeQuizDataP1 = [...quizData];
+            for (let i = activeQuizDataP1.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [activeQuizDataP1[i], activeQuizDataP1[j]] = [activeQuizDataP1[j], activeQuizDataP1[i]];
+            }
+
+            activeQuizDataP2 = [...quizData];
+            for (let i = activeQuizDataP2.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [activeQuizDataP2[i], activeQuizDataP2[j]] = [activeQuizDataP2[j], activeQuizDataP2[i]];
+            }
+
+            currentIndexP1 = 0;
+            currentIndexP2 = 0;
+            scoreP1 = 0;
+            scoreP2 = 0;
+            finishedP1 = false;
+            finishedP2 = false;
+            isAnsweringP1 = false;
+            isAnsweringP2 = false;
+
+            updateScoreDisplay();
+            
+            if(currentMode === 1) {
+                uiCounter.parentElement.classList.remove('hidden');
+                uiCounter.parentElement.previousElementSibling.classList.remove('hidden');
+            } else {
+                uiCounter.parentElement.classList.add('hidden');
+                uiCounter.parentElement.previousElementSibling.classList.add('hidden');
+            }
+
+            loadNextQuestion(1);
+            if (currentMode === 2) {
+                loadNextQuestion(2);
+            }
+        }
+
+        function exitGame() {
+            showCustomModal("Keluar", "Yakin ingin keluar ke menu utama?", () => {
+                switchView('view-menu');
+            });
+        }
+
+        function checkGameOver() {
+            if (currentMode === 1 && finishedP1) {
+                showGameOver();
+            } else if (currentMode === 2 && finishedP1 && finishedP2) {
+                showGameOver();
+            }
+        }
+
+        function loadNextQuestion(player) {
+            let currentIndex = player === 1 ? currentIndexP1 : currentIndexP2;
+            let activeData = player === 1 ? activeQuizDataP1 : activeQuizDataP2;
+            
+            if (currentIndex >= activeData.length) {
+                if (player === 1) finishedP1 = true;
+                if (player === 2) finishedP2 = true;
+                
+                uiQuestion[player].textContent = "Selesai! Menunggu pemain lain...";
+                const cards = player === 1 ? cardsP1 : cardsP2;
+                for (let i = 1; i <= 4; i++) {
+                    cards[i].classList.add('hidden');
+                }
+                
+                checkGameOver();
+                return;
+            }
+
+            if (player === 1) isAnsweringP1 = false;
+            if (player === 2) isAnsweringP2 = false;
+
+            const q = activeData[currentIndex];
+            
+            if (currentMode === 1) {
+                uiCounter.textContent = `${currentIndex + 1} / ${activeData.length}`;
+            }
+            
+            uiQuestion[player].textContent = q.question;
+            
+            const cards = player === 1 ? cardsP1 : cardsP2;
+            const texts = player === 1 ? textP1 : textP2;
+            const progs = player === 1 ? progP1 : progP2;
+
+            for (let i = 1; i <= 4; i++) {
+                cards[i].classList.remove('hidden', 'correct', 'wrong');
+                texts[i].textContent = q.options[i-1];
+                progs[i].style.width = '0%';
+            }
+            
+            if (player === 1) { 
+                targetFingersP1 = 0; framesHeldP1 = 0; 
+                document.getElementById('p1-name').textContent = currentMode === 1 ? `Pemain (${currentIndex + 1}/${activeData.length})` : `Pemain 1 (${currentIndex + 1}/${activeData.length})`;
+            }
+            if (player === 2) { 
+                targetFingersP2 = 0; framesHeldP2 = 0; 
+                document.getElementById('p2-name').textContent = `Pemain 2 (${currentIndex + 1}/${activeData.length})`;
+            }
+        }
+
+        function updateScoreDisplay() {
+            uiScoreP1.textContent = scoreP1 * 10;
+            if (currentMode === 2) {
+                uiScoreP2.textContent = scoreP2 * 10;
+            }
+        }
+
+        function handleAnswer(player, selectedOption) {
+            if (player === 1 && isAnsweringP1) return;
+            if (player === 2 && isAnsweringP2) return;
+
+            if (player === 1) isAnsweringP1 = true;
+            if (player === 2) isAnsweringP2 = true;
+
+            const activeData = player === 1 ? activeQuizDataP1 : activeQuizDataP2;
+            const currentIndex = player === 1 ? currentIndexP1 : currentIndexP2;
+            const q = activeData[currentIndex];
+            const isCorrect = (selectedOption === q.correctOption);
+            
+            const playerCard = player === 1 ? cardsP1[selectedOption] : cardsP2[selectedOption];
+            const correctCard = player === 1 ? cardsP1[q.correctOption] : cardsP2[q.correctOption];
+
+            if (isCorrect) {
+                playerCard.classList.add('correct');
+                if (player === 1) scoreP1++;
+                if (player === 2) scoreP2++;
+            } else {
+                playerCard.classList.add('wrong');
+                correctCard.classList.add('correct');
+            }
+
+            updateScoreDisplay();
+
+            setTimeout(() => {
+                if (player === 1) {
+                    currentIndexP1++;
+                    loadNextQuestion(1);
+                } else {
+                    currentIndexP2++;
+                    loadNextQuestion(2);
+                }
+            }, 2500);
+        }
+
+        function showGameOver() {
+            modalGameOver.classList.remove('hidden');
+            modalGameOver.classList.add('flex');
+            
+            if (currentMode === 1) {
+                document.getElementById('result-1p').classList.remove('hidden');
+                document.getElementById('result-2p').classList.add('hidden');
+                document.getElementById('final-score-1p').textContent = scoreP1 * 10;
+                
+                let msg = "Hebat!";
+                if(scoreP1 === activeQuizDataP1.length) msg = "Sempurna! Kamu Jenius! 🌟";
+                else if(scoreP1 < activeQuizDataP1.length/2) msg = "Terus berlatih ya! 💪";
+                document.getElementById('game-over-msg').textContent = msg;
+
+            } else {
+                document.getElementById('result-1p').classList.add('hidden');
+                document.getElementById('result-2p').classList.remove('hidden');
+                document.getElementById('result-2p').classList.add('grid');
+                
+                document.getElementById('final-score-p1').textContent = scoreP1 * 10;
+                document.getElementById('final-score-p2').textContent = scoreP2 * 10;
+
+                let winMsg = "";
+                if (scoreP1 > scoreP2) winMsg = "Pemenang: Pemain 1! 🏆";
+                else if (scoreP2 > scoreP1) winMsg = "Pemenang: Pemain 2! 🏆";
+                else winMsg = "Seri! Pertandingan Seimbang! 🤝";
+                
+                document.getElementById('winner-announcement').textContent = winMsg;
+                document.getElementById('game-over-msg').textContent = "Duel Berakhir!";
+            }
+        }
+
+        const videoElement = document.querySelector('.input_video');
+        const canvasElement = document.querySelector('.output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        
+        let cameraObj = null;
+        let handsObj = null;
+        let isCameraRunning = false;
+
+        function countRaisedFingers(landmarks) {
+            let fingers = 0;
+            if (landmarks[8].y < landmarks[6].y) fingers++;  
+            if (landmarks[12].y < landmarks[10].y) fingers++; 
+            if (landmarks[16].y < landmarks[14].y) fingers++; 
+            if (landmarks[20].y < landmarks[18].y) fingers++; 
+            return Math.min(fingers, 4); 
+        }
+
+        function onHandsResults(results) {
+            if (!isCameraRunning) return;
+
+            if (!loadingOverlay.classList.contains('hidden')) {
+                loadingOverlay.classList.add('hidden');
+                startGame(); 
+            }
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            let detP1 = 0;
+            let detP2 = 0;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#ffffff', lineWidth: 2});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#3b82f6', lineWidth: 1, radius: 3});
+
+                    const fingers = countRaisedFingers(landmarks);
+                    const wristX = landmarks[0].x; 
+
+                    if (currentMode === 1) {
+                        detP1 = fingers;
+                    } else {
+                        if (wristX >= 0.5) {
+                            detP1 = fingers;
+                        } else {
+                            detP2 = fingers;
+                        }
+                    }
+                }
+            }
+
+            canvasCtx.restore();
+
+            detectP1.textContent = detP1;
+            if (currentMode === 2) detectP2.textContent = detP2;
+
+            if (!isAnsweringP1 && !finishedP1) {
+                processPlayerLockIn(1, detP1);
+            }
+            if (currentMode === 2 && !isAnsweringP2 && !finishedP2) {
+                processPlayerLockIn(2, detP2);
+            }
+        }
+
+        function processPlayerLockIn(player, detectedCount) {
+            const isValidAnswer = (detectedCount >= 1 && detectedCount <= 4);
+            
+            let currentTarget = player === 1 ? targetFingersP1 : targetFingersP2;
+            let currentFrames = player === 1 ? framesHeldP1 : framesHeldP2;
+            const uiProgressArr = player === 1 ? progP1 : progP2;
+
+            if (isValidAnswer) {
+                if (detectedCount === currentTarget) {
+                    currentFrames++;
+                    
+                    const pct = Math.min((currentFrames / REQUIRED_FRAMES) * 100, 100);
+                    uiProgressArr[currentTarget].style.width = `${pct}%`;
+
+                    if (currentFrames >= REQUIRED_FRAMES) {
+                        handleAnswer(player, currentTarget);
+                        resetAllProgress();
+                    }
+                } else {
+                    if(currentTarget !== 0) uiProgressArr[currentTarget].style.width = '0%';
+                    currentTarget = detectedCount;
+                    currentFrames = 1;
+                }
+            } else {
+                if(currentTarget !== 0) uiProgressArr[currentTarget].style.width = '0%';
+                currentTarget = 0;
+                currentFrames = 0;
+            }
+
+            if (player === 1) { targetFingersP1 = currentTarget; framesHeldP1 = currentFrames; }
+            else { targetFingersP2 = currentTarget; framesHeldP2 = currentFrames; }
+        }
+
+        function resetAllProgress() {
+            for (let i = 1; i <= 4; i++) {
+                progP1[i].style.width = '0%';
+                progP2[i].style.width = '0%';
+            }
+        }
+
+        function startMediaPipe() {
+            loadingOverlay.classList.remove('hidden');
+            loadingOverlay.classList.add('flex');
+            document.getElementById('loading-text').textContent = "Mengakses Kamera...";
+            
+            if (!handsObj) {
+                handsObj = new Hands({locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }});
+
+                handsObj.setOptions({
+                    maxNumHands: 2, 
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.7,
+                    minTrackingConfidence: 0.6
+                });
+                handsObj.onResults(onHandsResults);
+            }
+
+            if (!cameraObj) {
+                cameraObj = new Camera(videoElement, {
+                    onFrame: async () => {
+                        if(isCameraRunning) {
+                            if (canvasElement.width !== videoElement.videoWidth) {
+                                canvasElement.width = videoElement.videoWidth;
+                                canvasElement.height = videoElement.videoHeight;
+                            }
+                            await handsObj.send({image: videoElement});
+                        }
+                    },
+                    width: 640,
+                    height: 480,
+                    facingMode: 'user'
+                });
+            }
+
+            isCameraRunning = true;
+            cameraObj.start().catch(err => {
+                console.error(err);
+                loadingOverlay.innerHTML = `
+                    <div class="text-red-500 text-6xl mb-4"><i class="fas fa-video-slash"></i></div>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-2">Akses Kamera Gagal</h2>
+                    <button onclick="switchView('view-menu')" class="mt-4 bg-blue-500 text-white px-6 py-2 rounded-xl">Kembali ke Menu</button>
+                `;
+            });
+        }
+
+        function stopCamera() {
+            isCameraRunning = false;
+            if (cameraObj) {
+                cameraObj.stop();
+            }
+        }
+    </script>
+</body>
+</html>
